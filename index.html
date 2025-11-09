@@ -7,6 +7,10 @@
    <!--=============== REMIXICONS ===============-->
    <link href="https://cdn.jsdelivr.net/npm/remixicon@2.5.0/fonts/remixicon.css" rel="stylesheet">
 
+   <!--=============== FIREBASE===============-->
+   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+
    <title>Real-Time Chat System</title>
    <style>
       /*=============== GOOGLE FONTS ===============*/
@@ -489,6 +493,21 @@
         background: #ff6b6b;
       }
 
+      /* Loading spinner */
+      .loading {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid hsla(0, 0%, 100%, 0.3);
+        border-radius: 50%;
+        border-top-color: #fff;
+        animation: spin 1s ease-in-out infinite;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+
       /*=============== BREAKPOINTS ===============*/
       /* For medium devices */
       @media screen and (min-width: 576px) {
@@ -575,7 +594,7 @@
    <div class="chat-container" id="chatContainer">
       <div class="connection-status" id="connectionStatus">
          <div class="status-dot"></div>
-         <span>Connected</span>
+         <span>Connected to Firebase</span>
       </div>
       <div class="user-indicator" id="userIndicator">User: </div>
       <div class="chat-wrapper">
@@ -618,109 +637,31 @@
    </div>
    
    <script>
-      // Simple real-time communication using localStorage and polling
-      class RealTimeChat {
-         constructor() {
-            this.messages = [];
-            this.currentUser = null;
-            this.partner = null;
-            this.pollInterval = null;
-            this.lastMessageId = 0;
-            
-            // Initialize from localStorage
-            this.loadMessages();
-         }
-         
-         // Load messages from localStorage
-         loadMessages() {
-            const stored = localStorage.getItem('chatMessages');
-            if (stored) {
-               this.messages = JSON.parse(stored);
-               if (this.messages.length > 0) {
-                  this.lastMessageId = Math.max(...this.messages.map(m => m.id));
-               }
-            }
-         }
-         
-         // Save messages to localStorage
-         saveMessages() {
-            localStorage.setItem('chatMessages', JSON.stringify(this.messages));
-         }
-         
-         // Add a new message
-         addMessage(text, sender, senderName) {
-            const message = {
-               id: ++this.lastMessageId,
-               text: text,
-               sender: sender,
-               senderName: senderName,
-               timestamp: Date.now()
-            };
-            
-            this.messages.push(message);
-            this.saveMessages();
-            
-            // Trigger storage event to notify other tabs
-            localStorage.setItem('chatUpdate', Date.now().toString());
-            
-            return message;
-         }
-         
-         // Get all messages
-         getMessages() {
-            return this.messages;
-         }
-         
-         // Get new messages since last check
-         getNewMessages(lastId) {
-            return this.messages.filter(msg => msg.id > lastId);
-         }
-         
-         // Start polling for new messages
-         startPolling(callback) {
-            this.pollInterval = setInterval(() => {
-               const lastId = this.lastMessageId;
-               const newMessages = this.getNewMessages(lastId);
-               
-               if (newMessages.length > 0) {
-                  this.lastMessageId = Math.max(...this.messages.map(m => m.id));
-                  callback(newMessages);
-               }
-            }, 500);
-            
-            // Also listen to storage events (for same browser different tabs)
-            window.addEventListener('storage', (e) => {
-               if (e.key === 'chatUpdate') {
-                  this.loadMessages();
-                  const lastId = this.lastMessageId;
-                  const newMessages = this.getNewMessages(lastId);
-                  
-                  if (newMessages.length > 0) {
-                     this.lastMessageId = Math.max(...this.messages.map(m => m.id));
-                     callback(newMessages);
-                  }
-               }
-            });
-         }
-         
-         // Stop polling
-         stopPolling() {
-            if (this.pollInterval) {
-               clearInterval(this.pollInterval);
-               this.pollInterval = null;
-            }
-         }
-      }
-
-      // User credentials
-      const users = {
-         "krish": { password: "1", name: " Krishna" },
-         "harsh": { password: "123", name: " Harsh" }
+      // Firebase configuration
+      const firebaseConfig = {
+        apiKey: "AIzaSyBtRuaTkFPAl0DMOrdnNlEMAliPVj4nAkw",
+        authDomain: "chat-me-176cf.firebaseapp.com",
+        databaseURL: "https://chat-me-176cf-default-rtdb.firebaseio.com",
+        projectId: "chat-me-176cf",
+        storageBucket: "chat-me-176cf.firebasestorage.app",
+        messagingSenderId: "441256742709",
+        appId: "1:441256742709:web:e67e447a00c3b43c4b067c",
+        measurementId: "G-8WHNV64YBE"
       };
 
-      // Initialize chat system
-      const chatSystem = new RealTimeChat();
+      // Initialize Firebase
+      firebase.initializeApp(firebaseConfig);
+      const database = firebase.database();
+
+      // User credentials - FIXED: Using proper user objects
+      const users = {
+         "krish": { password: "1", name: "Krishna" },
+         "harsh": { password: "123", name: "Harsh" }
+      };
+
       let currentUser = null;
+      let messagesRef = null;
+      let isChatInitialized = false; // Prevent multiple initializations
 
       document.addEventListener('DOMContentLoaded', function() {
          // Toggle password visibility
@@ -739,7 +680,7 @@
             }
          });
          
-         // Handle form submission
+         // Handle form submission - FIXED: Proper user validation
          const loginForm = document.getElementById('loginForm');
          const successContainer = document.getElementById('successContainer');
          const chatButton = document.getElementById('chatButton');
@@ -753,28 +694,32 @@
          loginForm.addEventListener('submit', function(e) {
             e.preventDefault();
             
-            const username = document.getElementById('login-email').value;
+            const username = document.getElementById('login-email').value.trim();
             const password = document.getElementById('login-pass').value;
             
-            // Check credentials
-            if(users[username] && users[username].password === password) {
+            console.log('Login attempt:', username, password); // Debug log
+            
+            // FIXED: Proper user validation
+            if (users[username] && users[username].password === password) {
                currentUser = username;
-               chatSystem.currentUser = username;
-               
-               // Determine partner
-               chatSystem.partner = username === 'krish' ? 'harsh' : 'krish';
                
                // Update UI with user info
                userWelcome.textContent = `Welcome ${users[username].name}!`;
                userIndicator.textContent = `User: ${users[username].name}`;
-               chatPartnerName.textContent = users[chatSystem.partner].name;
+               
+               // Determine partner
+               const partner = username === 'krish' ? 'harsh' : 'krish';
+               chatPartnerName.textContent = users[partner].name;
                
                // Show success message
                successContainer.style.display = 'flex';
                loginForm.style.display = 'none';
                
+               console.log('Login successful for:', username); // Debug log
+               
             } else {
-               alert('Invalid username or password. Use:\nUser Krishna: userA/passA\nUser Harsh: userB/passB');
+               alert('Invalid username or password!\n\nTry:\nKrishna: krish / 1\nHarsh: harsh / 123');
+               console.log('Login failed - users object:', users); // Debug log
             }
          });
          
@@ -783,8 +728,11 @@
             successContainer.style.display = 'none';
             chatContainer.style.display = 'flex';
             
-            // Initialize chat
-            initializeChat();
+            // Initialize Firebase chat only once
+            if (!isChatInitialized) {
+               initializeFirebaseChat();
+               isChatInitialized = true;
+            }
          });
          
          // Close chat when clicking X button
@@ -793,12 +741,18 @@
             loginForm.style.display = 'block';
             loginForm.reset();
             
-            // Stop polling for messages
-            chatSystem.stopPolling();
+            // Clean up Firebase listeners
+            if (messagesRef) {
+               messagesRef.off();
+            }
+            isChatInitialized = false;
          });
          
-         // Initialize chat functionality
-         function initializeChat() {
+         // Initialize Firebase chat functionality - FIXED: Prevent message duplication
+         function initializeFirebaseChat() {
+            // Reference to messages in Firebase
+            messagesRef = database.ref('messages');
+            
             // Clear existing messages (except the welcome message)
             const chatMessages = document.getElementById('chatMessages');
             const welcomeMessage = chatMessages.querySelector('.message.received');
@@ -807,51 +761,66 @@
                chatMessages.appendChild(welcomeMessage);
             }
             
-            // Display existing messages
-            const allMessages = chatSystem.getMessages();
-            allMessages.forEach(message => {
-               displayMessage(message);
+            // Track displayed message IDs to prevent duplicates
+            const displayedMessageIds = new Set();
+            
+            // Load existing messages from Firebase - FIXED: Only load once
+            messagesRef.once('value').then((snapshot) => {
+               const messages = snapshot.val();
+               if (messages) {
+                  Object.entries(messages).forEach(([key, message]) => {
+                     if (!displayedMessageIds.has(key)) {
+                        displayMessage(message);
+                        displayedMessageIds.add(key);
+                     }
+                  });
+               }
             });
             
-            // Start polling for new messages
-            chatSystem.startPolling(function(newMessages) {
-               newMessages.forEach(message => {
-                  // Only display messages from partner or ourselves
-                  if (message.sender === currentUser || message.sender === chatSystem.partner) {
-                     displayMessage(message);
-                  }
-               });
+            // Listen for new messages in real-time - FIXED: Only new messages
+            messagesRef.on('child_added', (snapshot) => {
+               const messageKey = snapshot.key;
+               const message = snapshot.val();
+               
+               // Only display if not already displayed
+               if (!displayedMessageIds.has(messageKey)) {
+                  displayMessage(message);
+                  displayedMessageIds.add(messageKey);
+               }
             });
             
             // Send message functionality
             const chatInput = document.getElementById('chatInput');
             const chatSend = document.getElementById('chatSend');
             
-            chatSend.addEventListener('click', sendMessage);
+            chatSend.addEventListener('click', sendMessageToFirebase);
             chatInput.addEventListener('keypress', function(e) {
                if (e.key === 'Enter') {
-                  sendMessage();
+                  sendMessageToFirebase();
                }
             });
             
-            function sendMessage() {
+            function sendMessageToFirebase() {
                const messageText = chatInput.value.trim();
-               if (messageText) {
-                  // Add message to system
-                  const message = chatSystem.addMessage(
-                     messageText, 
-                     currentUser, 
-                     users[currentUser].name
-                  );
+               if (messageText && currentUser) {
+                  const message = {
+                     text: messageText,
+                     sender: currentUser,
+                     senderName: users[currentUser].name,
+                     timestamp: Date.now()
+                  };
                   
-                  // Display the message immediately
-                  displayMessage(message);
-                  
-                  // Clear input
-                  chatInput.value = '';
-                  
-                  // Focus back to input
-                  chatInput.focus();
+                  // Push message to Firebase
+                  messagesRef.push(message)
+                     .then(() => {
+                        // Clear input on success
+                        chatInput.value = '';
+                        chatInput.focus();
+                     })
+                     .catch((error) => {
+                        console.error('Error sending message:', error);
+                        alert('Error sending message. Please try again.');
+                     });
                }
             }
          }
@@ -892,7 +861,19 @@
          const hours = now.getHours().toString().padStart(2, '0');
          const minutes = now.getMinutes().toString().padStart(2, '0');
          document.getElementById('initialTime').textContent = `${hours}:${minutes}`;
+         
+         // Update connection status based on Firebase connection
+         const connectedRef = database.ref(".info/connected");
+         connectedRef.on("value", (snap) => {
+            if (snap.val() === true) {
+               connectionStatus.classList.remove('offline');
+               connectionStatus.innerHTML = '<div class="status-dot"></div><span>Connected to Firebase</span>';
+            } else {
+               connectionStatus.classList.add('offline');
+               connectionStatus.innerHTML = '<div class="status-dot"></div><span>Offline - Reconnecting...</span>';
+            }
+         });
       });
    </script>
 </body>
-</html>
+   </html>
